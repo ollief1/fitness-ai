@@ -8,6 +8,7 @@ import {
   getSleeps,
   getCycles,
 } from "@/lib/whoop-store";
+import { getInjuries } from "@/lib/injuries-store";
 
 function buildSystemPrompt(): string {
   return `You are an expert triathlon coach and sports scientist. You understand periodisation, training load management, and recovery optimisation for endurance athletes.
@@ -27,18 +28,20 @@ Key principles you follow:
 - Consider the balance across swim/bike/run disciplines
 - Account for upcoming race timing when suggesting intensity
 - Flag any concerning patterns (overtraining, under-recovery, imbalanced training)
+- IMPORTANT: Always check for active injuries. If the athlete has injuries, you MUST avoid recommending any disciplines or activities they've flagged. Suggest safe alternatives instead. For severe injuries, recommend rest or very gentle cross-training only.
 
 Keep your tone friendly and direct — like a knowledgeable coach talking to their athlete. Use plain language, not jargon.`;
 }
 
 async function buildTrainingContext(): Promise<string> {
-  const [phase, activities, goals, recoveries, sleeps, cycles] = await Promise.all([
+  const [phase, activities, goals, recoveries, sleeps, cycles, injuries] = await Promise.all([
     getCurrentPhase(),
     getActivities(),
     getUpcomingGoals(),
     getRecoveries(),
     getSleeps(),
     getCycles(),
+    getInjuries(),
   ]);
 
   // Recent activities (last 14 days)
@@ -163,6 +166,15 @@ async function buildTrainingContext(): Promise<string> {
           }
         : null,
     },
+
+    active_injuries: injuries.map((inj) => ({
+      name: inj.name,
+      area: inj.area,
+      severity: inj.severity,
+      avoid_disciplines: inj.avoid_disciplines,
+      avoid_activities: inj.avoid_activities,
+      notes: inj.notes,
+    })),
   };
 
   return JSON.stringify(context, null, 2);

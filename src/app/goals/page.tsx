@@ -3,6 +3,19 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+type Severity = "minor" | "moderate" | "severe";
+
+interface Injury {
+  id: string;
+  name: string;
+  area: string;
+  severity: Severity;
+  avoid_disciplines: string[];
+  avoid_activities: string[];
+  notes?: string;
+  created_at: string;
+}
+
 interface RaceGoal {
   id: string;
   name: string;
@@ -69,6 +82,17 @@ function regStatusColor(s: string): string {
   return "bg-gray-100 text-gray-500";
 }
 
+const BODY_AREAS = [
+  "knee", "shoulder", "ankle", "back", "hip", "foot",
+  "calf", "hamstring", "quad", "shin", "neck", "wrist", "other",
+];
+
+const SEVERITIES: { value: Severity; label: string; color: string }[] = [
+  { value: "minor", label: "Minor", color: "bg-yellow-100 text-yellow-700" },
+  { value: "moderate", label: "Moderate", color: "bg-orange-100 text-orange-700" },
+  { value: "severe", label: "Severe", color: "bg-red-100 text-red-700" },
+];
+
 const emptyForm = {
   name: "",
   date: "",
@@ -82,12 +106,27 @@ const emptyForm = {
   notes: "",
 };
 
+const emptyInjuryForm = {
+  name: "",
+  area: "knee",
+  severity: "minor" as Severity,
+  avoid_disciplines: [] as string[],
+  avoid_activities: "",
+  notes: "",
+};
+
 export default function GoalsPage() {
   const [goals, setGoals] = useState<RaceGoal[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
+
+  // Injury state
+  const [injuries, setInjuries] = useState<Injury[]>([]);
+  const [showInjuryForm, setShowInjuryForm] = useState(false);
+  const [editingInjuryId, setEditingInjuryId] = useState<string | null>(null);
+  const [injuryForm, setInjuryForm] = useState(emptyInjuryForm);
 
   async function loadGoals() {
     try {
@@ -101,8 +140,19 @@ export default function GoalsPage() {
     }
   }
 
+  async function loadInjuries() {
+    try {
+      const res = await fetch("/api/injuries");
+      const data = await res.json();
+      setInjuries(data.injuries || []);
+    } catch (err) {
+      console.error("Failed to load injuries:", err);
+    }
+  }
+
   useEffect(() => {
     loadGoals();
+    loadInjuries();
   }, []);
 
   function openAddForm() {
@@ -166,6 +216,75 @@ export default function GoalsPage() {
   async function handleDelete(id: string) {
     await fetch(`/api/goals/${id}`, { method: "DELETE" });
     loadGoals();
+  }
+
+  // ── Injury handlers ──
+
+  function openAddInjuryForm() {
+    setInjuryForm(emptyInjuryForm);
+    setEditingInjuryId(null);
+    setShowInjuryForm(true);
+  }
+
+  function openEditInjuryForm(injury: Injury) {
+    setInjuryForm({
+      name: injury.name,
+      area: injury.area,
+      severity: injury.severity,
+      avoid_disciplines: injury.avoid_disciplines,
+      avoid_activities: injury.avoid_activities.join(", "),
+      notes: injury.notes || "",
+    });
+    setEditingInjuryId(injury.id);
+    setShowInjuryForm(true);
+  }
+
+  async function handleInjurySubmit(e: React.FormEvent) {
+    e.preventDefault();
+
+    const payload = {
+      name: injuryForm.name,
+      area: injuryForm.area,
+      severity: injuryForm.severity,
+      avoid_disciplines: injuryForm.avoid_disciplines,
+      avoid_activities: injuryForm.avoid_activities
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      notes: injuryForm.notes || undefined,
+    };
+
+    if (editingInjuryId) {
+      await fetch(`/api/injuries/${editingInjuryId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await fetch("/api/injuries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    }
+
+    setShowInjuryForm(false);
+    setEditingInjuryId(null);
+    loadInjuries();
+  }
+
+  async function handleDeleteInjury(id: string) {
+    await fetch(`/api/injuries/${id}`, { method: "DELETE" });
+    loadInjuries();
+  }
+
+  function toggleAvoidDiscipline(d: string) {
+    setInjuryForm((prev) => ({
+      ...prev,
+      avoid_disciplines: prev.avoid_disciplines.includes(d)
+        ? prev.avoid_disciplines.filter((x) => x !== d)
+        : [...prev.avoid_disciplines, d],
+    }));
   }
 
   const now = new Date();
@@ -545,6 +664,246 @@ export default function GoalsPage() {
           </button>
         </div>
       )}
+
+      {/* ─── Injuries Section ─── */}
+      <div className="mt-12 pt-8 border-t border-gray-200">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">Active Injuries</h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              The AI advisor will account for these when suggesting training
+            </p>
+          </div>
+          <button
+            onClick={openAddInjuryForm}
+            className="text-xs text-white bg-gray-900 hover:bg-gray-700 px-3 py-1.5 rounded-md transition-colors"
+          >
+            Add Injury
+          </button>
+        </div>
+
+        {/* Injury form */}
+        {showInjuryForm && (
+          <div className="bg-white border border-gray-200 rounded-lg p-6 mb-4">
+            <h3 className="text-sm font-medium text-gray-700 mb-4">
+              {editingInjuryId ? "Edit Injury" : "Log Injury"}
+            </h3>
+            <form onSubmit={handleInjurySubmit} className="space-y-4">
+              {/* Row 1: Name + Area + Severity */}
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">
+                    Description *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={injuryForm.name}
+                    onChange={(e) =>
+                      setInjuryForm({ ...injuryForm, name: e.target.value })
+                    }
+                    placeholder="e.g. Left knee pain"
+                    className="w-full text-sm border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">
+                    Body Area *
+                  </label>
+                  <select
+                    value={injuryForm.area}
+                    onChange={(e) =>
+                      setInjuryForm({ ...injuryForm, area: e.target.value })
+                    }
+                    className="w-full text-sm border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {BODY_AREAS.map((a) => (
+                      <option key={a} value={a}>
+                        {a.charAt(0).toUpperCase() + a.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">
+                    Severity *
+                  </label>
+                  <select
+                    value={injuryForm.severity}
+                    onChange={(e) =>
+                      setInjuryForm({
+                        ...injuryForm,
+                        severity: e.target.value as Severity,
+                      })
+                    }
+                    className="w-full text-sm border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {SEVERITIES.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Row 2: Avoid disciplines */}
+              <div>
+                <label className="block text-xs text-gray-500 mb-2">
+                  Avoid Disciplines
+                </label>
+                <div className="flex gap-2">
+                  {["swim", "bike", "run"].map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => toggleAvoidDiscipline(d)}
+                      className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${
+                        injuryForm.avoid_disciplines.includes(d)
+                          ? "bg-red-50 border-red-300 text-red-700"
+                          : "border-gray-200 text-gray-500 hover:border-gray-300"
+                      }`}
+                    >
+                      {d.charAt(0).toUpperCase() + d.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Row 3: Avoid activities + Notes */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">
+                    Avoid Activities
+                  </label>
+                  <input
+                    type="text"
+                    value={injuryForm.avoid_activities}
+                    onChange={(e) =>
+                      setInjuryForm({
+                        ...injuryForm,
+                        avoid_activities: e.target.value,
+                      })
+                    }
+                    placeholder="e.g. intervals, hills, butterfly (comma-separated)"
+                    className="w-full text-sm border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">
+                    Notes
+                  </label>
+                  <input
+                    type="text"
+                    value={injuryForm.notes}
+                    onChange={(e) =>
+                      setInjuryForm({ ...injuryForm, notes: e.target.value })
+                    }
+                    placeholder="Any extra context..."
+                    className="w-full text-sm border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Buttons */}
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="submit"
+                  className="text-xs text-white bg-gray-900 hover:bg-gray-700 px-4 py-2 rounded-md transition-colors"
+                >
+                  {editingInjuryId ? "Save Changes" : "Add Injury"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowInjuryForm(false);
+                    setEditingInjuryId(null);
+                  }}
+                  className="text-xs text-gray-500 hover:text-gray-700 px-4 py-2 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Injury list */}
+        {injuries.length > 0 ? (
+          <div className="space-y-2">
+            {injuries.map((injury) => {
+              const sev = SEVERITIES.find((s) => s.value === injury.severity);
+              return (
+                <div
+                  key={injury.id}
+                  className="bg-white border border-gray-200 rounded-lg p-4"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-sm font-medium text-gray-900">
+                          {injury.name}
+                        </h3>
+                        <span
+                          className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                            sev?.color || "bg-gray-100 text-gray-500"
+                          }`}
+                        >
+                          {injury.severity}
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 capitalize">
+                          {injury.area}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-gray-500">
+                        {injury.avoid_disciplines.length > 0 && (
+                          <span>
+                            Avoid:{" "}
+                            {injury.avoid_disciplines
+                              .map((d) => d.charAt(0).toUpperCase() + d.slice(1))
+                              .join(", ")}
+                          </span>
+                        )}
+                        {injury.avoid_activities.length > 0 && (
+                          <span>
+                            No {injury.avoid_activities.join(", ")}
+                          </span>
+                        )}
+                      </div>
+                      {injury.notes && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          {injury.notes}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 ml-4 flex-shrink-0">
+                      <button
+                        onClick={() => openEditInjuryForm(injury)}
+                        className="text-[10px] text-gray-400 hover:text-gray-600 transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <span className="text-gray-200">|</span>
+                      <button
+                        onClick={() => handleDeleteInjury(injury.id)}
+                        className="text-[10px] text-gray-400 hover:text-green-600 transition-colors"
+                      >
+                        Resolved
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          !showInjuryForm && (
+            <p className="text-xs text-gray-400 py-4">
+              No active injuries — great!
+            </p>
+          )
+        )}
+      </div>
     </div>
   );
 }

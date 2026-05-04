@@ -30,6 +30,7 @@ function getFS() {
     "phase:override": "phase-override.json",
     "garmin:status": "garmin-status.json",
     "garmin:data": "garmin-data.json",
+    "injuries": "injuries.json",
   };
 
   return { fs, path, DATA_DIR, FILE_MAP };
