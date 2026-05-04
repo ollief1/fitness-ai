@@ -1,4 +1,13 @@
-export default function Home() {
+import { redirect } from "next/navigation";
+import { getTokens } from "@/lib/store";
+
+export default async function Home() {
+  const tokens = await getTokens();
+
+  if (tokens) {
+    redirect("/dashboard");
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="text-center max-w-md mx-auto px-6">
