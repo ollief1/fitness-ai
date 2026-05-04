@@ -1,16 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 
 function disciplineIcon(text: string): string {
   const lower = text.toLowerCase();
-  if (lower.includes("swim")) return "🏊";
-  if (lower.includes("bike") || lower.includes("ride") || lower.includes("cycle")) return "🚴";
-  if (lower.includes("run")) return "🏃";
-  if (lower.includes("rest")) return "😴";
-  if (lower.includes("strength") || lower.includes("gym")) return "🏋️";
-  return "🏃";
+  if (lower.includes("swim")) return "\u{1F3CA}";
+  if (lower.includes("bike") || lower.includes("ride") || lower.includes("cycle")) return "\u{1F6B4}";
+  if (lower.includes("run")) return "\u{1F3C3}";
+  if (lower.includes("rest")) return "\u{1F634}";
+  if (lower.includes("strength") || lower.includes("gym")) return "\u{1F3CB}️";
+  return "\u{1F3C3}";
 }
 
 interface DaySummary {
@@ -23,7 +23,6 @@ interface DaySummary {
 
 function parsePlanToDays(planText: string): DaySummary[] {
   const days: DaySummary[] = [];
-  // Split by ## headers (day names)
   const sections = planText.split(/^## /m).filter(Boolean);
 
   for (const section of sections) {
@@ -31,7 +30,6 @@ function parsePlanToDays(planText: string): DaySummary[] {
     const dayName = lines[0]?.trim();
     if (!dayName) continue;
 
-    // Check if this looks like a day of the week
     const dayNames = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
     if (!dayNames.some((d) => dayName.toLowerCase().startsWith(d))) continue;
 
@@ -80,8 +78,28 @@ export default function WeekPlanCard() {
   const [days, setDays] = useState<DaySummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cacheLoaded, setCacheLoaded] = useState(false);
 
-  async function loadPlan() {
+  // Load cached plan on mount
+  useEffect(() => {
+    async function loadCache() {
+      try {
+        const res = await fetch("/api/advisor/cache");
+        const data = await res.json();
+        if (data.cache?.plan?.content) {
+          setPlan(data.cache.plan.content);
+          setDays(parsePlanToDays(data.cache.plan.content));
+        }
+      } catch {
+        // fine
+      } finally {
+        setCacheLoaded(true);
+      }
+    }
+    loadCache();
+  }, []);
+
+  async function generatePlan() {
     setLoading(true);
     setError(null);
     try {
@@ -117,9 +135,9 @@ export default function WeekPlanCard() {
           >
             Full plan
           </Link>
-          {!loading && (
+          {!loading && cacheLoaded && (
             <button
-              onClick={loadPlan}
+              onClick={generatePlan}
               className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
             >
               {plan ? "Refresh" : "Generate"}
@@ -160,7 +178,7 @@ export default function WeekPlanCard() {
         </div>
       )}
 
-      {!plan && !loading && !error && (
+      {!plan && !loading && !error && cacheLoaded && (
         <p className="text-xs text-gray-400 py-2">
           Click &quot;Generate&quot; for a structured 7-day training plan.
         </p>

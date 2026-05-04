@@ -1,14 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 
 export default function TodaySession() {
   const [session, setSession] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cacheLoaded, setCacheLoaded] = useState(false);
 
-  async function loadSession() {
+  // Load cached content on mount
+  useEffect(() => {
+    async function loadCache() {
+      try {
+        const res = await fetch("/api/advisor/cache");
+        const data = await res.json();
+        if (data.cache?.session?.content) {
+          setSession(data.cache.session.content);
+        }
+      } catch {
+        // fine
+      } finally {
+        setCacheLoaded(true);
+      }
+    }
+    loadCache();
+  }, []);
+
+  async function generateSession() {
     setLoading(true);
     setError(null);
     try {
@@ -30,10 +49,8 @@ export default function TodaySession() {
     }
   }
 
-  // Extract a short summary from the full session text (first meaningful paragraph)
   function getPreview(text: string): string {
     const lines = text.split("\n").filter((l) => l.trim() !== "");
-    // Collect non-header lines for preview
     const preview: string[] = [];
     for (const line of lines) {
       if (line.startsWith("#") || line.startsWith("**")) continue;
@@ -54,9 +71,9 @@ export default function TodaySession() {
           >
             Full detail
           </Link>
-          {!loading && (
+          {!loading && cacheLoaded && (
             <button
-              onClick={loadSession}
+              onClick={generateSession}
               className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
             >
               {session ? "Refresh" : "Generate"}
@@ -82,7 +99,7 @@ export default function TodaySession() {
         </p>
       )}
 
-      {!session && !loading && !error && (
+      {!session && !loading && !error && cacheLoaded && (
         <p className="text-xs text-gray-400 py-2">
           Click &quot;Generate&quot; for a personalised session based on your recovery and training load.
         </p>

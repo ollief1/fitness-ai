@@ -9,6 +9,7 @@ import {
   getCycles,
 } from "@/lib/whoop-store";
 import { getInjuries } from "@/lib/injuries-store";
+import { setCachedContent } from "@/lib/advisor-cache";
 
 function buildSystemPrompt(): string {
   return `You are an expert triathlon coach and sports scientist. You understand periodisation, training load management, and recovery optimisation for endurance athletes.
@@ -261,6 +262,13 @@ export async function POST(request: NextRequest) {
       weeksToRace: phase.weeksToRace,
       targetRace: phase.targetRace?.name || null,
     };
+
+    // Cache the generated content
+    if (type === "plan" || type === "session") {
+      await setCachedContent(type, response);
+    } else if (type === "weekly") {
+      await setCachedContent("analysis", response);
+    }
 
     if (type === "plan") {
       return NextResponse.json({

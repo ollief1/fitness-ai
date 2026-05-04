@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 
 interface PhaseInfo {
@@ -12,6 +12,13 @@ interface PhaseInfo {
   weekInPhase: number;
   totalWeeksInPhase: number;
   isOverride: boolean;
+}
+
+interface CachedEntry {
+  content: string;
+  notes: string;
+  generated_at: string;
+  type: string;
 }
 
 const PHASES = [
@@ -38,7 +45,6 @@ function phaseColor(phase: string): string {
 
 function renderMarkdown(text: string) {
   return text.split("\n").map((line, i) => {
-    // ## Headers
     if (line.startsWith("## ") || line.startsWith("### ")) {
       return (
         <h3 key={i} className="text-sm font-semibold text-gray-800 mt-5 mb-1">
@@ -46,7 +52,6 @@ function renderMarkdown(text: string) {
         </h3>
       );
     }
-    // **Bold headers**
     if (line.startsWith("**") && line.endsWith("**")) {
       return (
         <h3 key={i} className="text-sm font-semibold text-gray-800 mt-5 mb-1">
@@ -54,7 +59,6 @@ function renderMarkdown(text: string) {
         </h3>
       );
     }
-    // Lines with **bold** inline
     if (line.includes("**")) {
       const parts = line.split(/(\*\*[^*]+\*\*)/g);
       return (
@@ -76,6 +80,17 @@ function renderMarkdown(text: string) {
   });
 }
 
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
 type ActiveTab = "session" | "plan" | "analysis";
 
 export default function AdvisorPage() {
@@ -87,20 +102,29 @@ export default function AdvisorPage() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("session");
 
-  // Session state
+  // Content state — loaded from cache or generated fresh
   const [session, setSession] = useState<string | null>(null);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [sessionGeneratedAt, setSessionGeneratedAt] = useState<string | null>(null);
 
-  // Plan state
   const [plan, setPlan] = useState<string | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
+  const [planGeneratedAt, setPlanGeneratedAt] = useState<string | null>(null);
 
-  // Analysis state
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisGeneratedAt, setAnalysisGeneratedAt] = useState<string | null>(null);
+
+  // Notes state
+  const [sessionNotes, setSessionNotes] = useState("");
+  const [planNotes, setPlanNotes] = useState("");
+  const [analysisNotes, setAnalysisNotes] = useState("");
+  const [notesSaving, setNotesSaving] = useState(false);
+
+  // ── Load phase ──
 
   async function loadPhase() {
     try {
@@ -114,9 +138,57 @@ export default function AdvisorPage() {
     }
   }
 
+  // ── Load cached content ──
+
+  const loadCache = useCallback(async () => {
+    try {
+      const res = await fetch("/api/advisor/cache");
+      const data = await res.json();
+      const cache = data.cache || {};
+
+      if (cache.session) {
+        setSession(cache.session.content);
+        setSessionNotes(cache.session.notes || "");
+        setSessionGeneratedAt(cache.session.generated_at);
+      }
+      if (cache.plan) {
+        setPlan(cache.plan.content);
+        setPlanNotes(cache.plan.notes || "");
+        setPlanGeneratedAt(cache.plan.generated_at);
+      }
+      if (cache.analysis) {
+        setAnalysis(cache.analysis.content);
+        setAnalysisNotes(cache.analysis.notes || "");
+        setAnalysisGeneratedAt(cache.analysis.generated_at);
+      }
+    } catch {
+      // fine — just means nothing cached yet
+    }
+  }, []);
+
   useEffect(() => {
     loadPhase();
-  }, []);
+    loadCache();
+  }, [loadCache]);
+
+  // ── Save notes (debounced in the UI via onBlur) ──
+
+  async function saveNotes(type: "session" | "plan" | "analysis", notes: string) {
+    setNotesSaving(true);
+    try {
+      await fetch("/api/advisor/cache", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, notes }),
+      });
+    } catch {
+      // silent fail
+    } finally {
+      setNotesSaving(false);
+    }
+  }
+
+  // ── Generate functions ──
 
   async function generateSession() {
     setSessionLoading(true);
@@ -132,6 +204,7 @@ export default function AdvisorPage() {
         setSessionError(data.error);
       } else {
         setSession(data.session);
+        setSessionGeneratedAt(data.generated);
       }
     } catch {
       setSessionError("Failed to generate session");
@@ -154,6 +227,7 @@ export default function AdvisorPage() {
         setPlanError(data.error);
       } else {
         setPlan(data.plan);
+        setPlanGeneratedAt(data.generated);
       }
     } catch {
       setPlanError("Failed to generate plan");
@@ -176,6 +250,7 @@ export default function AdvisorPage() {
         setAnalysisError(data.error);
       } else {
         setAnalysis(data.analysis);
+        setAnalysisGeneratedAt(data.generated);
       }
     } catch {
       setAnalysisError("Failed to generate analysis");
@@ -183,6 +258,8 @@ export default function AdvisorPage() {
       setAnalysisLoading(false);
     }
   }
+
+  // ── Phase override ──
 
   async function handleOverride() {
     try {
@@ -212,6 +289,39 @@ export default function AdvisorPage() {
   }
 
   const isLoading = sessionLoading || planLoading || analysisLoading;
+
+  // ── Notes component ──
+
+  function NotesArea({
+    value,
+    onChange,
+    onSave,
+    placeholder,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    onSave: () => void;
+    placeholder: string;
+  }) {
+    return (
+      <div className="mt-4 pt-4 border-t border-gray-100">
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-xs font-medium text-gray-500">Your Notes</label>
+          {notesSaving && (
+            <span className="text-[10px] text-gray-400">Saving...</span>
+          )}
+        </div>
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onSave}
+          placeholder={placeholder}
+          rows={3}
+          className="w-full text-sm border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y text-gray-600 placeholder:text-gray-300"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
@@ -372,16 +482,18 @@ export default function AdvisorPage() {
                   Today&apos;s Session
                 </h2>
                 <span className="text-xs text-gray-400">
-                  {new Date().toLocaleDateString("en-GB", {
-                    weekday: "long",
-                    day: "numeric",
-                    month: "long",
-                  })}
+                  {sessionGeneratedAt ? timeAgo(sessionGeneratedAt) : ""}
                 </span>
               </div>
               <div className="prose prose-sm max-w-none text-gray-600">
                 {renderMarkdown(session)}
               </div>
+              <NotesArea
+                value={sessionNotes}
+                onChange={setSessionNotes}
+                onSave={() => saveNotes("session", sessionNotes)}
+                placeholder="Add your own notes about today's session..."
+              />
             </div>
           )}
 
@@ -437,16 +549,18 @@ export default function AdvisorPage() {
                   Weekly Training Plan
                 </h2>
                 <span className="text-xs text-gray-400">
-                  Week of{" "}
-                  {new Date().toLocaleDateString("en-GB", {
-                    day: "numeric",
-                    month: "long",
-                  })}
+                  {planGeneratedAt ? timeAgo(planGeneratedAt) : ""}
                 </span>
               </div>
               <div className="prose prose-sm max-w-none text-gray-600">
                 {renderMarkdown(plan)}
               </div>
+              <NotesArea
+                value={planNotes}
+                onChange={setPlanNotes}
+                onSave={() => saveNotes("plan", planNotes)}
+                placeholder="Add your own notes about this week's plan..."
+              />
             </div>
           )}
 
@@ -502,16 +616,18 @@ export default function AdvisorPage() {
                   Weekly Analysis
                 </h2>
                 <span className="text-xs text-gray-400">
-                  {new Date().toLocaleDateString("en-GB", {
-                    weekday: "long",
-                    day: "numeric",
-                    month: "long",
-                  })}
+                  {analysisGeneratedAt ? timeAgo(analysisGeneratedAt) : ""}
                 </span>
               </div>
               <div className="prose prose-sm max-w-none text-gray-600">
                 {renderMarkdown(analysis)}
               </div>
+              <NotesArea
+                value={analysisNotes}
+                onChange={setAnalysisNotes}
+                onSave={() => saveNotes("analysis", analysisNotes)}
+                placeholder="Add your own notes about this analysis..."
+              />
             </div>
           )}
 
